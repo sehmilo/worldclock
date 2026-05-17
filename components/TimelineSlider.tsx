@@ -176,9 +176,8 @@ export default function TimelineSlider({
       style={{
         position: 'absolute',
         bottom: 'calc(min(35vh, 360px) + 16px)',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: 'min(620px, 80vw)',
+        left: 20,
+        width: 'min(620px, calc(100vw - 40px))',
         background: 'rgba(22, 27, 34, 0.55)',
         backdropFilter: 'blur(14px)',
         WebkitBackdropFilter: 'blur(14px)',
