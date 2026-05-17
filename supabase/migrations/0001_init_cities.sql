@@ -61,3 +61,16 @@ create policy "cities_delete_own"
 -- Helpful index for ordering by recency
 create index if not exists cities_user_updated_idx
   on public.cities (user_id, updated_at desc);
+
+-- Grant table-level access to the authenticated role.
+-- RLS policies above scope each user to their own rows; these grants
+-- let PostgREST forward authenticated requests to RLS in the first place.
+-- (Tables created via the Supabase Table Editor get these automatically;
+-- tables created via raw SQL do not.)
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.cities to authenticated;
+
+-- Belt-and-suspenders: ensure future tables in this schema also get
+-- granted automatically (so we don't hit this again on the next table).
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to authenticated;
