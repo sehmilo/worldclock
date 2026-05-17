@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 interface CityLite {
   timezone: string;
@@ -95,6 +95,13 @@ export default function TimelineSlider({
   workStart = 9,
   workEnd = 17,
 }: Props) {
+  // Defer first render until after client mount — the slider reads the
+  // user's timezone and current time, both of which differ between the
+  // pre-rendered HTML (UTC, build-time clock) and the live browser.
+  // Rendering null on the server avoids React hydration mismatch (#418).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   const localTime = virtualTime.toLocaleString('en-GB', {
     timeZone: userTimezone,
     hour: '2-digit',
@@ -160,6 +167,9 @@ export default function TimelineSlider({
 
   // Position (0-100%) of the current slider value within the heatmap
   const markerPct = ((offsetMinutes + MAX_OFFSET) / (2 * MAX_OFFSET)) * 100;
+
+  // Server pre-render: skip the entire slider (would mismatch hydration)
+  if (!mounted) return null;
 
   return (
     <div
