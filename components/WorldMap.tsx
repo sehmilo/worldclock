@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import maplibregl from 'maplibre-gl';
+import tzlookup from 'tz-lookup';
 import type { City } from '@/lib/types';
 import { DEFAULT_CITIES, LABEL_COLORS } from '@/lib/types';
 import { buildMeridianFeatures, buildNightPolygon } from '@/lib/sun';
@@ -55,6 +56,14 @@ export default function WorldMap() {
   const [mapReady, setMapReady] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState<string | null>(null);
+
+  // User's local timezone — auto-detected from the browser, no permission needed
+  const userTimezone = useMemo(() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
+    catch { return 'UTC'; }
+  }, []);
 
   const [realTime, setRealTime] = useState(() => new Date());
   const [offsetMinutes, setOffsetMinutes] = useState(0);
@@ -291,6 +300,74 @@ export default function WorldMap() {
     if (typeof window !== 'undefined') window.location.reload();
   }
 
+  /**
+   * Request browser geolocation, reverse-geocode via Photon, and add the
+   * detected place as a "Home" pin. One click → tailored to user.
+   */
+  function handleUseMyLocation() {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocError('Geolocation not supported by this browser.');
+      return;
+    }
+    setLocating(true);
+    setLocError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        let name = 'My Location';
+        let country = '';
+        try {
+          const res = await fetch(
+            `https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}&limit=1`,
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const f = data.features?.[0];
+            if (f) {
+              name = f.properties.name || f.properties.city || 'My Location';
+              country = f.properties.country || '';
+            }
+          }
+        } catch { /* fall back to defaults */ }
+
+        let timezone = userTimezone;
+        try { timezone = tzlookup(lat, lng); } catch { /* keep user tz */ }
+
+        const id = `home:${lat.toFixed(3)},${lng.toFixed(3)}`;
+        const home: City = {
+          id,
+          name,
+          country,
+          lat,
+          lng,
+          timezone,
+          label: 'Other',
+          customLabel: 'Home',
+          enabled: true,
+        };
+
+        setCities((prev) => {
+          if (prev.some((c) => c.id === id)) return prev;
+          // Put Home first so it leads the list
+          return [home, ...prev];
+        });
+        setSelectedId(id);
+        setLocating(false);
+      },
+      (err) => {
+        const msg =
+          err.code === err.PERMISSION_DENIED ? 'Permission denied.' :
+          err.code === err.POSITION_UNAVAILABLE ? 'Location unavailable.' :
+          'Could not get location.';
+        setLocError(msg);
+        setLocating(false);
+        setTimeout(() => setLocError(null), 4000);
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 5 * 60_000 },
+    );
+  }
+
   const isEmpty = cities.length === 0;
 
   return (
@@ -324,6 +401,51 @@ export default function WorldMap() {
         />
       </button>
 
+      {/* Use my location button (top-right) */}
+      <button
+        onClick={handleUseMyLocation}
+        disabled={locating}
+        title="Detect your location and drop a Home pin"
+        style={{
+          position: 'absolute', top: 20, right: 20, zIndex: 20,
+          display: 'flex', alignItems: 'center', gap: 8,
+          background: 'rgba(22, 27, 34, 0.85)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid rgba(48, 54, 61, 0.6)',
+          borderRadius: 10,
+          color: '#e6edf3',
+          padding: '8px 14px',
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: locating ? 'wait' : 'pointer',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+          opacity: locating ? 0.7 : 1,
+        }}
+        onMouseEnter={(e) => { if (!locating) e.currentTarget.style.borderColor = '#22c55e'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.6)'; }}
+      >
+        <span style={{ fontSize: 14 }}>📍</span>
+        <span>{locating ? 'Locating…' : 'Use my location'}</span>
+      </button>
+
+      {/* Location error toast */}
+      {locError && (
+        <div style={{
+          position: 'absolute', top: 64, right: 20, zIndex: 20,
+          background: 'rgba(127, 29, 29, 0.9)',
+          border: '1px solid #f85149',
+          borderRadius: 8,
+          color: '#fecaca',
+          padding: '6px 12px',
+          fontSize: 12,
+          maxWidth: 240,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+        }}>
+          {locError}
+        </div>
+      )}
+
       {/* Empty-state hint */}
       {isEmpty && (
         <div style={{
@@ -352,7 +474,12 @@ export default function WorldMap() {
       )}
 
       {/* Floating timeline (above the panel) */}
-      <TimelineSlider offsetMinutes={offsetMinutes} onChange={setOffsetMinutes} virtualTime={virtualTime} />
+      <TimelineSlider
+        offsetMinutes={offsetMinutes}
+        onChange={setOffsetMinutes}
+        virtualTime={virtualTime}
+        userTimezone={userTimezone}
+      />
 
       {/* Floating city panel docked at bottom */}
       <div style={{

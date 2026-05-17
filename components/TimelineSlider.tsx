@@ -4,6 +4,7 @@ interface Props {
   offsetMinutes: number;
   onChange: (offset: number) => void;
   virtualTime: Date;
+  userTimezone: string;
 }
 
 const MAX_OFFSET = 24 * 60; // ±24h
@@ -40,13 +41,29 @@ const stepBtnStyle: React.CSSProperties = {
   transition: 'background 0.12s, border-color 0.12s, color 0.12s',
 };
 
-export default function TimelineSlider({ offsetMinutes, onChange, virtualTime }: Props) {
-  const utc = virtualTime.toLocaleString('en-GB', {
-    timeZone: 'UTC',
+export default function TimelineSlider({ offsetMinutes, onChange, virtualTime, userTimezone }: Props) {
+  // Primary: the user's local time (auto-detected from browser/OS)
+  const localTime = virtualTime.toLocaleString('en-GB', {
+    timeZone: userTimezone,
     hour: '2-digit',
     minute: '2-digit',
     day: '2-digit',
     month: 'short',
+  });
+
+  // Short tz abbreviation (e.g. "WAT", "PST", "GMT+1")
+  const tzAbbr = new Intl.DateTimeFormat('en-US', {
+    timeZone: userTimezone,
+    timeZoneName: 'short',
+  })
+    .formatToParts(virtualTime)
+    .find((p) => p.type === 'timeZoneName')?.value ?? '';
+
+  // Secondary readout — keep UTC for ops-minded users
+  const utc = virtualTime.toLocaleString('en-GB', {
+    timeZone: 'UTC',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 
   const step = (delta: number) => onChange(clamp(offsetMinutes + delta));
@@ -77,10 +94,13 @@ export default function TimelineSlider({ offsetMinutes, onChange, virtualTime }:
       {/* Status row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: '#8b949e' }}>
         <span>−24h</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 13, color: '#e6edf3', fontWeight: 600 }}>{formatOffset(offsetMinutes)}</span>
           <span style={{ color: '#484f58' }}>·</span>
-          <span style={{ fontFamily: 'monospace' }}>{utc} UTC</span>
+          <span style={{ fontFamily: 'monospace', color: '#e6edf3' }} title={userTimezone}>
+            {localTime} <span style={{ color: '#22c55e', fontWeight: 600 }}>{tzAbbr}</span>
+          </span>
+          <span style={{ color: '#484f58', fontFamily: 'monospace', fontSize: 11 }}>· {utc} UTC</span>
           {offsetMinutes !== 0 && (
             <button
               onClick={() => onChange(0)}
