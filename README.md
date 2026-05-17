@@ -364,7 +364,11 @@ Coding conventions:
 
 ## 📜 License
 
-TBD. *(Likely permissive — MIT or Apache 2.0. Will be finalized before broader announcement.)*
+**Proprietary — All Rights Reserved.** Copyright © 2026 soluXYZon.
+
+This repository is **source-available**, not open-source. You may view, study, and run the code locally for personal use, and submit contributions back. You may **not** redistribute, sublicense, sell, or operate the Software as a commercial service without prior written permission from soluXYZon.
+
+See [`LICENSE`](./LICENSE) for the full terms, or contact us via GitHub for commercial licensing inquiries.
 
 ---
 

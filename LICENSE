@@ -1,0 +1,36 @@
+Copyright (c) 2026 soluXYZon. All Rights Reserved.
+
+This software and its associated source code, documentation, design,
+and assets (collectively, the "Software") are the proprietary property
+of soluXYZon.
+
+The Software is made publicly viewable on this repository for the
+purposes of transparency, education, security review, and community
+contribution. Public visibility does not constitute a grant of any
+license to use, copy, modify, distribute, sublicense, or sell the
+Software, in whole or in part, for any purpose.
+
+Permitted uses (without prior written permission):
+  - Viewing and reading the source code.
+  - Cloning the repository for personal study or evaluation.
+  - Running the Software locally for personal, non-production use.
+  - Submitting bug reports, feature requests, or pull requests, with
+    the understanding that any contribution is licensed to soluXYZon
+    on a perpetual, worldwide, royalty-free basis.
+
+Prohibited uses (without prior written permission from soluXYZon):
+  - Operating the Software, or any derivative work, as a hosted or
+    managed service offered to third parties.
+  - Redistributing, sublicensing, or selling the Software or any
+    derivative work.
+  - Using the Software in any commercial product, service, or offering.
+  - Removing or altering this notice in any copy of the Software.
+
+For commercial licensing inquiries, partnerships, or any use not
+explicitly permitted above, please contact: github.com/sehmilo
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+IN NO EVENT SHALL SOLUXYZON BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY ARISING FROM USE OF THE SOFTWARE.
