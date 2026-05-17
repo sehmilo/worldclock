@@ -478,7 +478,9 @@ export default function WorldMap() {
         offsetMinutes={offsetMinutes}
         onChange={setOffsetMinutes}
         virtualTime={virtualTime}
+        realTime={realTime}
         userTimezone={userTimezone}
+        cities={cities}
       />
 
       {/* Floating city panel docked at bottom */}
