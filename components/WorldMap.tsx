@@ -7,24 +7,20 @@ import tzlookup from 'tz-lookup';
 import type { City } from '@/lib/types';
 import { DEFAULT_CITIES, LABEL_COLORS } from '@/lib/types';
 import { buildMeridianFeatures, buildNightPolygon } from '@/lib/sun';
+import {
+  loadLocalCities,
+  saveLocalCities,
+  clearLocalCities,
+  loadRemoteCities,
+  upsertRemoteCity,
+  deleteRemoteCity,
+  syncRemoteCities,
+} from '@/lib/storage';
+import { useAuth } from '@/lib/useAuth';
+import { getSupabase } from '@/lib/supabase/client';
 import CityList from './CityList';
 import TimelineSlider from './TimelineSlider';
-
-const STORAGE_KEY = 'soluxyzon.worldclock.cities.v3';
-
-function loadCities(): City[] {
-  if (typeof window === 'undefined') return DEFAULT_CITIES;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_CITIES;
-    const parsed = JSON.parse(raw) as City[];
-    return Array.isArray(parsed)
-      ? parsed.map((c) => ({ ...c, enabled: c.enabled ?? true }))
-      : DEFAULT_CITIES;
-  } catch {
-    return DEFAULT_CITIES;
-  }
-}
+import AuthButton from './AuthButton';
 
 function buildCitiesGeoJSON(
   cities: City[],
@@ -59,6 +55,11 @@ export default function WorldMap() {
   const [locating, setLocating] = useState(false);
   const [locError, setLocError] = useState<string | null>(null);
 
+  // Auth + storage
+  const auth = useAuth();
+  const [pendingMigration, setPendingMigration] = useState<City[] | null>(null);
+  const lastUserIdRef = useRef<string | null>(null);
+
   // User's local timezone — auto-detected from the browser, no permission needed
   const userTimezone = useMemo(() => {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
@@ -72,11 +73,48 @@ export default function WorldMap() {
     [realTime, offsetMinutes],
   );
 
-  useEffect(() => { setCities(loadCities()); }, []);
-
+  // ---------- Load cities on auth change ----------
+  // Guests: read localStorage on mount.
+  // Signed-in: load from Supabase. If guest had cities, offer to migrate them.
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cities)); } catch {}
-  }, [cities]);
+    if (auth.loading) return;
+
+    const sb = getSupabase();
+    if (auth.user && sb) {
+      const justSignedIn = lastUserIdRef.current !== auth.user.id;
+      lastUserIdRef.current = auth.user.id;
+
+      (async () => {
+        const remote = await loadRemoteCities(sb, auth.user!.id);
+        const local = loadLocalCities();
+
+        // On first sign-in this session, if local has data not in remote, offer to migrate
+        if (justSignedIn && local.length > 0) {
+          const remoteIds = new Set(remote.map((c) => c.id));
+          const newLocals = local.filter((c) => !remoteIds.has(c.id));
+          if (newLocals.length > 0) {
+            setPendingMigration(newLocals);
+          }
+        }
+        setCities(remote);
+      })();
+    } else {
+      // Guest mode
+      lastUserIdRef.current = null;
+      setCities(loadLocalCities());
+    }
+  }, [auth.loading, auth.user]);
+
+  // ---------- Persist on change ----------
+  // Guests write to localStorage; signed-in users write to Supabase
+  // (per-city upserts handled in mutation handlers; here we just keep
+  // localStorage in sync as a fallback / offline cache).
+  useEffect(() => {
+    if (auth.loading) return;
+    if (!auth.user) {
+      saveLocalCities(cities);
+    }
+  }, [cities, auth.loading, auth.user]);
 
   useEffect(() => {
     const id = setInterval(() => setRealTime(new Date()), 30_000);
@@ -280,20 +318,27 @@ export default function WorldMap() {
   }, [selectedId, cities]);
 
   function handleAdd(city: City) {
+    const newCity: City = { ...city, enabled: true };
     setCities((prev) => {
       if (prev.some((c) => c.id === city.id)) return prev;
-      return [...prev, { ...city, enabled: true }];
+      return [...prev, newCity];
     });
     setSelectedId(city.id);
+    const sb = getSupabase();
+    if (auth.user && sb) void upsertRemoteCity(sb, auth.user.id, newCity);
   }
 
   function handleUpdate(updated: City) {
     setCities((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    const sb = getSupabase();
+    if (auth.user && sb) void upsertRemoteCity(sb, auth.user.id, updated);
   }
 
   function handleDelete(id: string) {
     setCities((prev) => prev.filter((c) => c.id !== id));
     if (selectedId === id) setSelectedId(null);
+    const sb = getSupabase();
+    if (auth.user && sb) void deleteRemoteCity(sb, auth.user.id, id);
   }
 
   function handleLogoClick() {
@@ -353,6 +398,8 @@ export default function WorldMap() {
           return [home, ...prev];
         });
         setSelectedId(id);
+        const sb = getSupabase();
+        if (auth.user && sb) void upsertRemoteCity(sb, auth.user.id, home);
         setLocating(false);
       },
       (err) => {
@@ -401,33 +448,94 @@ export default function WorldMap() {
         />
       </button>
 
-      {/* Use my location button (top-right) */}
-      <button
-        onClick={handleUseMyLocation}
-        disabled={locating}
-        title="Detect your location and drop a Home pin"
-        style={{
-          position: 'absolute', top: 20, right: 20, zIndex: 20,
-          display: 'flex', alignItems: 'center', gap: 8,
-          background: 'rgba(22, 27, 34, 0.85)',
+      {/* Top-right controls: location + auth */}
+      <div style={{
+        position: 'absolute', top: 20, right: 20, zIndex: 20,
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <button
+          onClick={handleUseMyLocation}
+          disabled={locating}
+          title="Detect your location and drop a Home pin"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'rgba(22, 27, 34, 0.85)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            border: '1px solid rgba(48, 54, 61, 0.6)',
+            borderRadius: 10,
+            color: '#e6edf3',
+            padding: '8px 14px',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: locating ? 'wait' : 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            opacity: locating ? 0.7 : 1,
+          }}
+          onMouseEnter={(e) => { if (!locating) e.currentTarget.style.borderColor = '#22c55e'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.6)'; }}
+        >
+          <span style={{ fontSize: 14 }}>📍</span>
+          <span>{locating ? 'Locating…' : 'Use my location'}</span>
+        </button>
+        {auth.enabled && <AuthButton user={auth.user} loading={auth.loading} />}
+      </div>
+
+      {/* Migration prompt — shown after sign-in if guest had local cities */}
+      {pendingMigration && pendingMigration.length > 0 && (
+        <div style={{
+          position: 'absolute', top: 70, right: 20, zIndex: 25,
+          width: 300,
+          background: 'rgba(22, 27, 34, 0.95)',
           backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          border: '1px solid rgba(48, 54, 61, 0.6)',
+          border: '1px solid #22c55e',
           borderRadius: 10,
+          padding: 12,
           color: '#e6edf3',
-          padding: '8px 14px',
           fontSize: 12,
-          fontWeight: 600,
-          cursor: locating ? 'wait' : 'pointer',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-          opacity: locating ? 0.7 : 1,
-        }}
-        onMouseEnter={(e) => { if (!locating) e.currentTarget.style.borderColor = '#22c55e'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(48, 54, 61, 0.6)'; }}
-      >
-        <span style={{ fontSize: 14 }}>📍</span>
-        <span>{locating ? 'Locating…' : 'Use my location'}</span>
-      </button>
+          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            Import your guest cities?
+          </div>
+          <div style={{ color: '#8b949e', marginBottom: 10 }}>
+            You have <span style={{ color: '#22c55e', fontWeight: 600 }}>{pendingMigration.length}</span> {pendingMigration.length === 1 ? 'city' : 'cities'} saved locally that aren&apos;t in your account yet.
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={async () => {
+                const sb = getSupabase();
+                if (!sb || !auth.user || !pendingMigration) return;
+                const merged = [
+                  ...pendingMigration,
+                  ...cities.filter((c) => !pendingMigration.some((p) => p.id === c.id)),
+                ];
+                await syncRemoteCities(sb, auth.user.id, merged);
+                setCities(merged);
+                clearLocalCities();
+                setPendingMigration(null);
+              }}
+              style={{
+                flex: 1,
+                background: '#22c55e', border: 'none', borderRadius: 6,
+                color: '#0a0e1a', padding: '6px 10px', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Import all
+            </button>
+            <button
+              onClick={() => { clearLocalCities(); setPendingMigration(null); }}
+              style={{
+                background: 'transparent', border: '1px solid #30363d', borderRadius: 6,
+                color: '#8b949e', padding: '6px 10px', fontSize: 12, cursor: 'pointer',
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Location error toast */}
       {locError && (
